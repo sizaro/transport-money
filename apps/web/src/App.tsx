@@ -1,4 +1,4 @@
-function App() {
+﻿function App() {
   return (
     <main className="min-h-screen bg-gray-100 flex items-center justify-center">
       <div className="rounded-2xl bg-white p-8 shadow-lg">
@@ -7,7 +7,7 @@ function App() {
         </h1>
 
         <p className="mt-2 text-gray-600">
-          Tailwind CSS is working.
+          Frontend foundation is ready.
         </p>
       </div>
     </main>
