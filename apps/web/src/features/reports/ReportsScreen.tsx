@@ -1,211 +1,210 @@
 ﻿import { useMemo, useState } from 'react'
-import {
-  ArrowLeft,
-  CalendarDays,
-  ChevronRight,
-  Clock3,
-  Fuel,
-  ReceiptText,
-  TrendingDown,
-  TrendingUp,
-  Wallet,
-} from 'lucide-react'
-
+import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useApp } from '@/app/providers'
 import { formatMoney } from '@/features/boda/bodaQuickAmounts'
 import type { ExpenseEntry, IncomeEntry, Session } from '@/types/app'
 
 type ReportPeriod = 'sessions' | 'day' | 'week' | 'month' | 'year'
 
-type ReportRange = {
+interface ReportRange {
   start: Date
   end: Date
+  label: string
 }
 
-type Activity =
-  | {
-      type: 'income'
-      id: string
-      createdAt: string
-      amount: number
-    }
-  | {
-      type: 'expense'
-      id: string
-      createdAt: string
-      amount: number
-      category: string
-    }
-
-function formatDurationMinutes(totalMinutes: number) {
-  const safeMinutes = Math.max(0, Math.floor(totalMinutes))
-  const hours = Math.floor(safeMinutes / 60)
-  const minutes = safeMinutes % 60
-
-  return `${hours}h ${minutes.toString().padStart(2, '0')}m`
+function startOfDay(date: Date) {
+  const result = new Date(date)
+  result.setHours(0, 0, 0, 0)
+  return result
 }
 
-function formatDuration(startedAt: string, endedAt?: string) {
-  if (!endedAt) return 'Running'
-
-  const elapsed =
-    new Date(endedAt).getTime() - new Date(startedAt).getTime()
-
-  return formatDurationMinutes(elapsed / 60000)
+function endOfDay(date: Date) {
+  const result = new Date(date)
+  result.setHours(23, 59, 59, 999)
+  return result
 }
 
-function formatDate(value: string) {
-  return new Date(value).toLocaleDateString('en-UG', {
+function startOfWeek(date: Date) {
+  const result = startOfDay(date)
+  result.setDate(result.getDate() - result.getDay())
+  return result
+}
+
+function endOfWeek(date: Date) {
+  const result = startOfWeek(date)
+  result.setDate(result.getDate() + 6)
+  return endOfDay(result)
+}
+
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1)
+}
+
+function endOfMonth(date: Date) {
+  return new Date(
+    date.getFullYear(),
+    date.getMonth() + 1,
+    0,
+    23,
+    59,
+    59,
+    999,
+  )
+}
+
+function startOfYear(date: Date) {
+  return new Date(date.getFullYear(), 0, 1)
+}
+
+function endOfYear(date: Date) {
+  return new Date(date.getFullYear(), 11, 31, 23, 59, 59, 999)
+}
+
+function formatDate(date: Date) {
+  return date.toLocaleDateString('en-UG', {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
   })
 }
 
-function formatShortDate(value: string) {
-  return new Date(value).toLocaleDateString('en-UG', {
+function formatShortDate(date: Date) {
+  return date.toLocaleDateString('en-UG', {
     day: 'numeric',
     month: 'short',
+  })
+}
+
+function formatMonth(date: Date) {
+  return date.toLocaleDateString('en-UG', {
+    month: 'long',
     year: 'numeric',
   })
 }
 
-function formatTime(value: string) {
-  return new Date(value).toLocaleTimeString('en-UG', {
+function formatTime(date: Date) {
+  return date.toLocaleTimeString('en-UG', {
     hour: 'numeric',
     minute: '2-digit',
   })
 }
 
-function formatRangeDate(value: Date) {
-  return value.toLocaleDateString('en-UG', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
+function formatDuration(minutes: number) {
+  if (minutes < 1) return '0m'
+
+  const hours = Math.floor(minutes / 60)
+  const remaining = minutes % 60
+
+  if (hours === 0) return `${remaining}m`
+  if (remaining === 0) return `${hours}h`
+
+  return `${hours}h ${remaining}m`
 }
 
 function getReportRange(
   period: Exclude<ReportPeriod, 'sessions'>,
+  anchor: Date,
 ): ReportRange {
-  const now = new Date()
-
   if (period === 'day') {
-    const start = new Date(now)
-    start.setHours(0, 0, 0, 0)
-
-    const end = new Date(start)
-    end.setDate(end.getDate() + 1)
-
-    return { start, end }
+    return {
+      start: startOfDay(anchor),
+      end: endOfDay(anchor),
+      label: formatDate(anchor),
+    }
   }
 
   if (period === 'week') {
-    const start = new Date(now)
-    start.setHours(0, 0, 0, 0)
+    const start = startOfWeek(anchor)
+    const end = endOfWeek(anchor)
 
-    const day = start.getDay()
-    start.setDate(start.getDate() - day)
-
-    const end = new Date(start)
-    end.setDate(end.getDate() + 7)
-
-    return { start, end }
+    return {
+      start,
+      end,
+      label: `${formatShortDate(start)} – ${formatShortDate(end)} ${end.getFullYear()}`,
+    }
   }
 
   if (period === 'month') {
-    const start = new Date(now.getFullYear(), now.getMonth(), 1)
-    const end = new Date(
-      now.getFullYear(),
-      now.getMonth() + 1,
-      1,
-    )
-
-    return { start, end }
+    return {
+      start: startOfMonth(anchor),
+      end: endOfMonth(anchor),
+      label: formatMonth(anchor),
+    }
   }
 
-  const start = new Date(now.getFullYear(), 0, 1)
-  const end = new Date(now.getFullYear() + 1, 0, 1)
-
-  return { start, end }
+  return {
+    start: startOfYear(anchor),
+    end: endOfYear(anchor),
+    label: anchor.getFullYear().toString(),
+  }
 }
 
-function overlapsRange(
-  startedAt: string,
-  endedAt: string | undefined,
-  range: ReportRange,
+function shiftAnchor(
+  period: Exclude<ReportPeriod, 'sessions'>,
+  anchor: Date,
+  direction: -1 | 1,
 ) {
-  const start = new Date(startedAt).getTime()
-  const end = endedAt ? new Date(endedAt).getTime() : Date.now()
+  const next = new Date(anchor)
 
-  return start < range.end.getTime() && end > range.start.getTime()
+  if (period === 'day') {
+    next.setDate(next.getDate() + direction)
+  } else if (period === 'week') {
+    next.setDate(next.getDate() + direction * 7)
+  } else if (period === 'month') {
+    next.setMonth(next.getMonth() + direction)
+  } else {
+    next.setFullYear(next.getFullYear() + direction)
+  }
+
+  return next
 }
 
-function getOverlapMinutes(
-  startedAt: string,
-  endedAt: string | undefined,
-  range: ReportRange,
-) {
-  const sessionStart = new Date(startedAt).getTime()
-  const sessionEnd = endedAt
-    ? new Date(endedAt).getTime()
-    : Date.now()
-
-  const overlapStart = Math.max(
-    sessionStart,
-    range.start.getTime(),
-  )
-
-  const overlapEnd = Math.min(
-    sessionEnd,
-    range.end.getTime(),
-  )
-
-  if (overlapEnd <= overlapStart) return 0
-
-  return (overlapEnd - overlapStart) / 60000
+function isInsideRange(value: string, range: ReportRange) {
+  const date = new Date(value)
+  return date >= range.start && date <= range.end
 }
 
-function isTransactionInRange(
-  createdAt: string,
-  range: ReportRange,
-) {
-  const timestamp = new Date(createdAt).getTime()
+function overlapsRange(session: Session, range: ReportRange) {
+  const start = new Date(session.startedAt)
+  const end = session.endedAt ? new Date(session.endedAt) : new Date()
 
-  return (
-    timestamp >= range.start.getTime() &&
-    timestamp < range.end.getTime()
-  )
+  return start <= range.end && end >= range.start
 }
 
-function isFuelExpense(expense: ExpenseEntry) {
-  return expense.category.trim().toLowerCase() === 'fuel'
+function getOverlapMinutes(session: Session, range: ReportRange) {
+  const sessionStart = new Date(session.startedAt)
+  const sessionEnd = session.endedAt ? new Date(session.endedAt) : new Date()
+
+  const start = Math.max(sessionStart.getTime(), range.start.getTime())
+  const end = Math.min(sessionEnd.getTime(), range.end.getTime())
+
+  if (end <= start) return 0
+
+  return Math.round((end - start) / 60000)
 }
 
 function getSessionIncome(
   sessionId: string,
   income: IncomeEntry[],
+  range?: ReportRange,
 ) {
-  return income
-    .filter((entry) => entry.sessionId === sessionId)
-    .sort(
-      (a, b) =>
-        new Date(a.createdAt).getTime() -
-        new Date(b.createdAt).getTime(),
-    )
+  return income.filter(
+    entry =>
+      entry.sessionId === sessionId &&
+      (!range || isInsideRange(entry.createdAt, range)),
+  )
 }
 
 function getSessionExpenses(
   sessionId: string,
   expenses: ExpenseEntry[],
+  range?: ReportRange,
 ) {
-  return expenses
-    .filter((entry) => entry.sessionId === sessionId)
-    .sort(
-      (a, b) =>
-        new Date(a.createdAt).getTime() -
-        new Date(b.createdAt).getTime(),
-    )
+  return expenses.filter(
+    entry =>
+      entry.sessionId === sessionId &&
+      (!range || isInsideRange(entry.createdAt, range)),
+  )
 }
 
 function calculatePeriodTotals(
@@ -214,58 +213,108 @@ function calculatePeriodTotals(
   expenses: ExpenseEntry[],
   range: ReportRange,
 ) {
-  const overlappingSessions = sessions.filter((session) =>
-    overlapsRange(session.startedAt, session.endedAt, range),
+  const overlappingSessions = sessions.filter(session =>
+    overlapsRange(session, range),
   )
 
-  const sessionIds = new Set(
-    overlappingSessions.map((session) => session.id),
+  const periodIncome = income.filter(entry =>
+    isInsideRange(entry.createdAt, range),
   )
 
-  const received = income
-    .filter(
-      (entry) =>
-        sessionIds.has(entry.sessionId) &&
-        isTransactionInRange(entry.createdAt, range),
-    )
-    .reduce((total, entry) => total + entry.amount, 0)
+  const periodExpenses = expenses.filter(entry =>
+    isInsideRange(entry.createdAt, range),
+  )
 
-  const expenseTotal = expenses
-    .filter(
-      (entry) =>
-        sessionIds.has(entry.sessionId) &&
-        isTransactionInRange(entry.createdAt, range),
-    )
-    .reduce((total, entry) => total + entry.amount, 0)
+  const received = periodIncome.reduce(
+    (total, entry) => total + entry.amount,
+    0,
+  )
 
-  const fuel = expenses
-    .filter(
-      (entry) =>
-        sessionIds.has(entry.sessionId) &&
-        isTransactionInRange(entry.createdAt, range) &&
-        isFuelExpense(entry),
-    )
+  const totalExpenses = periodExpenses.reduce(
+    (total, entry) => total + entry.amount,
+    0,
+  )
+
+  const fuel = periodExpenses
+    .filter(entry => entry.category.trim().toLowerCase() === 'fuel')
     .reduce((total, entry) => total + entry.amount, 0)
 
   const workedMinutes = overlappingSessions.reduce(
-    (total, session) =>
-      total +
-      getOverlapMinutes(
-        session.startedAt,
-        session.endedAt,
-        range,
-      ),
+    (total, session) => total + getOverlapMinutes(session, range),
     0,
   )
 
   return {
+    sessions: overlappingSessions,
     received,
-    expenses: expenseTotal,
-    made: received - expenseTotal,
-    workedMinutes,
+    expenses: totalExpenses,
     fuel,
-    sessionCount: overlappingSessions.length,
+    made: received - totalExpenses,
+    workedMinutes,
   }
+}
+
+function PeriodSelector({
+  period,
+  anchor,
+  onAnchorChange,
+}: {
+  period: Exclude<ReportPeriod, 'sessions'>
+  anchor: Date
+  onAnchorChange: (date: Date) => void
+}) {
+  const range = getReportRange(period, anchor)
+
+  function go(direction: -1 | 1) {
+    onAnchorChange(shiftAnchor(period, anchor, direction))
+  }
+
+  function goCurrent() {
+    onAnchorChange(new Date())
+  }
+
+  return (
+    <section className="rounded-2xl border bg-card p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={() => go(-1)}
+          className="flex size-10 shrink-0 items-center justify-center rounded-xl border bg-background transition hover:bg-muted"
+          aria-label={`Previous ${period}`}
+        >
+          <ChevronLeft className="size-5" />
+        </button>
+
+        <div className="min-w-0 text-center">
+          <div className="mb-1 flex items-center justify-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <CalendarDays className="size-4" />
+            Selected {period}
+          </div>
+
+          <p className="truncate text-base font-semibold">
+            {range.label}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => go(1)}
+          className="flex size-10 shrink-0 items-center justify-center rounded-xl border bg-background transition hover:bg-muted"
+          aria-label={`Next ${period}`}
+        >
+          <ChevronRight className="size-5" />
+        </button>
+      </div>
+
+      <button
+        type="button"
+        onClick={goCurrent}
+        className="mt-3 w-full rounded-xl border bg-background px-3 py-2 text-sm font-medium transition hover:bg-muted"
+      >
+        Go to current {period}
+      </button>
+    </section>
+  )
 }
 
 function ReportTabs({
@@ -275,30 +324,32 @@ function ReportTabs({
   period: ReportPeriod
   onChange: (period: ReportPeriod) => void
 }) {
-  const periods: ReportPeriod[] = [
-    'sessions',
-    'day',
-    'week',
-    'month',
-    'year',
+  const tabs: { value: ReportPeriod; label: string }[] = [
+    { value: 'sessions', label: 'Sessions' },
+    { value: 'day', label: 'Day' },
+    { value: 'week', label: 'Week' },
+    { value: 'month', label: 'Month' },
+    { value: 'year', label: 'Year' },
   ]
 
   return (
-    <div className="grid grid-cols-5 rounded-xl border bg-background p-1">
-      {periods.map((value) => (
-        <button
-          key={value}
-          type="button"
-          onClick={() => onChange(value)}
-          className={`rounded-lg px-2 py-2.5 text-xs font-medium capitalize transition-colors ${
-            period === value
-              ? 'bg-muted text-foreground'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          {value === 'sessions' ? 'Sessions' : value}
-        </button>
-      ))}
+    <div className="overflow-x-auto">
+      <div className="flex min-w-max rounded-xl border bg-muted/40 p-1">
+        {tabs.map(tab => (
+          <button
+            key={tab.value}
+            type="button"
+            onClick={() => onChange(tab.value)}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+              period === tab.value
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -306,550 +357,162 @@ function ReportTabs({
 function SummaryCards({
   received,
   expenses,
-  made,
   fuel,
+  made,
   workedMinutes,
   sessionCount,
 }: {
   received: number
   expenses: number
-  made: number
   fuel: number
-  workedMinutes?: number
+  made: number
+  workedMinutes: number
   sessionCount: number
 }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
-      <div className="rounded-2xl border bg-background p-4">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <TrendingUp className="size-4" />
-          <p className="text-xs font-medium uppercase tracking-wide">
-            Received
-          </p>
-        </div>
-
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="rounded-2xl border bg-card p-4">
+        <p className="text-sm text-muted-foreground">Received</p>
         <p className="mt-2 text-2xl font-bold">
           UGX {formatMoney(received)}
         </p>
       </div>
 
-      <div className="rounded-2xl border bg-background p-4">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <TrendingDown className="size-4" />
-          <p className="text-xs font-medium uppercase tracking-wide">
-            Expenses
-          </p>
-        </div>
-
+      <div className="rounded-2xl border bg-card p-4">
+        <p className="text-sm text-muted-foreground">Expenses</p>
         <p className="mt-2 text-2xl font-bold">
           UGX {formatMoney(expenses)}
         </p>
-
         <p className="mt-1 text-xs text-muted-foreground">
           Fuel: UGX {formatMoney(fuel)}
         </p>
       </div>
 
-      <div className="rounded-2xl border bg-background p-4">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Wallet className="size-4" />
-          <p className="text-xs font-medium uppercase tracking-wide">
-            Made
-          </p>
-        </div>
-
+      <div className="rounded-2xl border bg-card p-4">
+        <p className="text-sm text-muted-foreground">Made</p>
         <p className="mt-2 text-2xl font-bold">
           UGX {formatMoney(made)}
         </p>
+      </div>
 
+      <div className="rounded-2xl border bg-card p-4">
+        <p className="text-sm text-muted-foreground">Worked</p>
+        <p className="mt-2 text-2xl font-bold">
+          {formatDuration(workedMinutes)}
+        </p>
         <p className="mt-1 text-xs text-muted-foreground">
-          {sessionCount}{' '}
-          {sessionCount === 1 ? 'session' : 'sessions'}
-          {workedMinutes !== undefined
-            ? ` · ${formatDurationMinutes(workedMinutes)} worked`
-            : ''}
+          {sessionCount} {sessionCount === 1 ? 'session' : 'sessions'}
         </p>
       </div>
     </div>
   )
 }
 
-function SessionOverview({
-  session,
-  received,
-  expenses,
-  made,
-  fuel,
-}: {
-  session: Session
-  received: number
-  expenses: number
-  made: number
-  fuel: number
-}) {
-  return (
-    <section className="rounded-2xl border bg-background">
-      <div className="border-b px-4 py-5">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Working session
-            </p>
-
-            <h2 className="mt-1 text-xl font-bold">
-              {formatDate(session.startedAt)}
-            </h2>
-
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-              <span>
-                {formatTime(session.startedAt)} –{' '}
-                {session.endedAt
-                  ? formatTime(session.endedAt)
-                  : 'Running'}
-              </span>
-
-              <span className="inline-flex items-center gap-1">
-                <Clock3 className="size-3.5" />
-                {formatDuration(
-                  session.startedAt,
-                  session.endedAt,
-                )}
-              </span>
-            </div>
-          </div>
-
-          <div className="rounded-xl bg-muted px-3 py-2 text-right">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              Made
-            </p>
-
-            <p className="text-lg font-bold">
-              UGX {formatMoney(made)}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 divide-x sm:grid-cols-4">
-        <div className="p-4">
-          <p className="text-xs text-muted-foreground">
-            Received
-          </p>
-          <p className="mt-1 font-bold">
-            UGX {formatMoney(received)}
-          </p>
-        </div>
-
-        <div className="p-4">
-          <p className="text-xs text-muted-foreground">
-            Expenses
-          </p>
-          <p className="mt-1 font-bold">
-            UGX {formatMoney(expenses)}
-          </p>
-        </div>
-
-        <div className="p-4">
-          <p className="text-xs text-muted-foreground">
-            Fuel
-          </p>
-          <p className="mt-1 font-bold">
-            UGX {formatMoney(fuel)}
-          </p>
-        </div>
-
-        <div className="p-4">
-          <p className="text-xs text-muted-foreground">
-            Net made
-          </p>
-          <p className="mt-1 font-bold">
-            UGX {formatMoney(made)}
-          </p>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function FuelPerformance({
-  session,
+function PeriodSessions({
+  sessions,
   income,
   expenses,
+  range,
+  onSelect,
 }: {
-  session: Session
+  sessions: Session[]
   income: IncomeEntry[]
   expenses: ExpenseEntry[]
+  range: ReportRange
+  onSelect: (id: string) => void
 }) {
-  const sessionIncome = getSessionIncome(session.id, income)
-
-  const fuelEntries = getSessionExpenses(
-    session.id,
-    expenses,
-  ).filter(isFuelExpense)
-
-  if (fuelEntries.length === 0) {
-    return (
-      <section className="rounded-2xl border bg-background">
-        <div className="flex items-center gap-3 border-b px-4 py-4">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
-            <Fuel className="size-5" />
-          </div>
-
-          <div>
-            <h3 className="font-semibold">
-              Fuel performance
-            </h3>
-
-            <p className="text-xs text-muted-foreground">
-              No fuel purchases were recorded in this session.
-            </p>
-          </div>
-        </div>
-      </section>
-    )
-  }
-
-  const firstFuelTime = new Date(
-    fuelEntries[0].createdAt,
-  ).getTime()
-
-  const beforeFirstFuel = sessionIncome
-    .filter(
-      (entry) =>
-        new Date(entry.createdAt).getTime() < firstFuelTime,
-    )
-    .reduce((total, entry) => total + entry.amount, 0)
+  const sorted = [...sessions].sort(
+    (a, b) =>
+      new Date(b.startedAt).getTime() -
+      new Date(a.startedAt).getTime(),
+  )
 
   return (
-    <section className="rounded-2xl border bg-background">
-      <div className="flex items-center gap-3 border-b px-4 py-4">
-        <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
-          <Fuel className="size-5" />
-        </div>
-
-        <div>
-          <h3 className="font-semibold">
-            Fuel performance
-          </h3>
-
-          <p className="text-xs text-muted-foreground">
-            Each fuel purchase starts a new earning period.
-          </p>
-        </div>
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-lg font-semibold">Sessions in this period</h2>
+        <p className="text-sm text-muted-foreground">
+          Sessions that overlapped the selected calendar period.
+        </p>
       </div>
 
-      <div className="p-4">
-        {beforeFirstFuel > 0 && (
-          <div className="mb-4 rounded-xl border p-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="font-semibold">
-                  Before first fuel purchase
-                </p>
+      {sorted.length === 0 ? (
+        <div className="rounded-2xl border border-dashed p-6 text-center">
+          <p className="font-medium">No sessions in this period</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Try another day, week, month, or year.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {sorted.map(session => {
+            const sessionIncome = getSessionIncome(
+              session.id,
+              income,
+              range,
+            )
 
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Money received before fuel was bought.
-                </p>
-              </div>
+            const sessionExpenses = getSessionExpenses(
+              session.id,
+              expenses,
+              range,
+            )
 
-              <p className="font-bold">
-                UGX {formatMoney(beforeFirstFuel)}
-              </p>
-            </div>
-          </div>
-        )}
+            const received = sessionIncome.reduce(
+              (total, entry) => total + entry.amount,
+              0,
+            )
 
-        <div className="space-y-3">
-          {fuelEntries.map((fuel, index) => {
-            const fuelTime = new Date(
-              fuel.createdAt,
-            ).getTime()
+            const expenseTotal = sessionExpenses.reduce(
+              (total, entry) => total + entry.amount,
+              0,
+            )
 
-            const nextFuel = fuelEntries[index + 1]
-
-            const periodEnd = nextFuel
-              ? new Date(nextFuel.createdAt).getTime()
-              : session.endedAt
-                ? new Date(session.endedAt).getTime()
-                : Date.now()
-
-            const receivedAfterFuel = sessionIncome
-              .filter((entry) => {
-                const incomeTime = new Date(
-                  entry.createdAt,
-                ).getTime()
-
-                return (
-                  incomeTime >= fuelTime &&
-                  incomeTime < periodEnd
-                )
-              })
-              .reduce(
-                (total, entry) => total + entry.amount,
-                0,
-              )
-
-            const actuallyMade =
-              receivedAfterFuel - fuel.amount
+            const worked = getOverlapMinutes(session, range)
 
             return (
-              <div
-                key={fuel.id}
-                className="rounded-xl border p-4"
+              <button
+                key={session.id}
+                type="button"
+                onClick={() => onSelect(session.id)}
+                className="w-full rounded-2xl border bg-card p-4 text-left transition hover:bg-muted/40"
               >
                 <div className="flex items-start justify-between gap-4">
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-semibold">
-                      Fuel purchase {index + 1}
+                      {formatDate(new Date(session.startedAt))}
                     </p>
 
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {formatTime(fuel.createdAt)}
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {formatTime(new Date(session.startedAt))}
+                      {' – '}
+                      {session.endedAt
+                        ? formatTime(new Date(session.endedAt))
+                        : 'Running'}
+                      {' · '}
+                      {formatDuration(worked)} in selected period
                     </p>
                   </div>
 
-                  <div className="text-right">
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Fuel bought
-                    </p>
-
-                    <p className="font-bold">
-                      UGX {formatMoney(fuel.amount)}
-                    </p>
-                  </div>
+                  <ChevronRight className="mt-1 size-5 shrink-0 text-muted-foreground" />
                 </div>
 
-                <div className="mt-4 space-y-2">
-                  <div className="flex items-center justify-between gap-4 rounded-lg bg-muted/50 px-3 py-2.5">
-                    <span className="text-sm text-muted-foreground">
-                      Received after fuel
-                    </span>
+                <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">
+                  <span>
+                    Received{' '}
+                    <strong>UGX {formatMoney(received)}</strong>
+                  </span>
 
-                    <span className="font-semibold">
-                      UGX {formatMoney(receivedAfterFuel)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-4 rounded-lg bg-muted/50 px-3 py-2.5">
-                    <span className="text-sm text-muted-foreground">
-                      Fuel cost
-                    </span>
-
-                    <span className="font-semibold">
-                      − UGX {formatMoney(fuel.amount)}
-                    </span>
-                  </div>
-
-                  <div className="mt-2 rounded-xl border-2 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Actually made
-                    </p>
-
-                    <p className="mt-1 text-2xl font-bold">
-                      UGX {formatMoney(actuallyMade)}
-                    </p>
-
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Received after this fuel purchase minus
-                      this fuel cost.
-                    </p>
-                  </div>
+                  <span>
+                    Made{' '}
+                    <strong>
+                      UGX {formatMoney(received - expenseTotal)}
+                    </strong>
+                  </span>
                 </div>
-
-                <p className="mt-3 text-xs text-muted-foreground">
-                  {nextFuel
-                    ? `This period ends at the next fuel purchase (${formatTime(
-                        nextFuel.createdAt,
-                      )}).`
-                    : 'This period continues until the session ended.'}
-                </p>
-              </div>
+              </button>
             )
           })}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function ExpenseBreakdown({
-  expenses,
-}: {
-  expenses: ExpenseEntry[]
-}) {
-  const grouped = new Map<string, number>()
-
-  for (const expense of expenses) {
-    grouped.set(
-      expense.category,
-      (grouped.get(expense.category) ?? 0) +
-        expense.amount,
-    )
-  }
-
-  const rows = [...grouped.entries()].sort(
-    (a, b) => b[1] - a[1],
-  )
-
-  return (
-    <section className="rounded-2xl border bg-background">
-      <div className="flex items-center gap-3 border-b px-4 py-4">
-        <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
-          <ReceiptText className="size-5" />
-        </div>
-
-        <div>
-          <h3 className="font-semibold">
-            Expense breakdown
-          </h3>
-
-          <p className="text-xs text-muted-foreground">
-            Every expense category in this session.
-          </p>
-        </div>
-      </div>
-
-      {rows.length === 0 ? (
-        <div className="p-4">
-          <p className="text-sm text-muted-foreground">
-            No expenses recorded.
-          </p>
-        </div>
-      ) : (
-        <div className="divide-y">
-          {rows.map(([category, amount]) => (
-            <div
-              key={category}
-              className="flex items-center justify-between gap-4 px-4 py-3"
-            >
-              <div className="flex items-center gap-3">
-                {isFuelExpense({
-                  id: '',
-                  sessionId: '',
-                  category,
-                  amount: 0,
-                  createdAt: '',
-                }) ? (
-                  <Fuel className="size-4 text-muted-foreground" />
-                ) : (
-                  <ReceiptText className="size-4 text-muted-foreground" />
-                )}
-
-                <span className="text-sm font-medium">
-                  {category}
-                </span>
-              </div>
-
-              <span className="font-semibold">
-                UGX {formatMoney(amount)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  )
-}
-
-function ActivityTimeline({
-  income,
-  expenses,
-}: {
-  income: IncomeEntry[]
-  expenses: ExpenseEntry[]
-}) {
-  const activities = useMemo<Activity[]>(() => {
-    const incomeActivities: Activity[] = income.map(
-      (entry) => ({
-        type: 'income',
-        id: entry.id,
-        createdAt: entry.createdAt,
-        amount: entry.amount,
-      }),
-    )
-
-    const expenseActivities: Activity[] = expenses.map(
-      (entry) => ({
-        type: 'expense',
-        id: entry.id,
-        createdAt: entry.createdAt,
-        amount: entry.amount,
-        category: entry.category,
-      }),
-    )
-
-    return [...incomeActivities, ...expenseActivities].sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() -
-        new Date(a.createdAt).getTime(),
-    )
-  }, [income, expenses])
-
-  return (
-    <section className="rounded-2xl border bg-background">
-      <div className="flex items-center gap-3 border-b px-4 py-4">
-        <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
-          <Clock3 className="size-5" />
-        </div>
-
-        <div>
-          <h3 className="font-semibold">
-            Activity timeline
-          </h3>
-
-          <p className="text-xs text-muted-foreground">
-            Everything that was recorded during the session.
-          </p>
-        </div>
-      </div>
-
-      {activities.length === 0 ? (
-        <div className="p-4">
-          <p className="text-sm text-muted-foreground">
-            No transactions were recorded.
-          </p>
-        </div>
-      ) : (
-        <div className="divide-y">
-          {activities.map((activity) => (
-            <div
-              key={`${activity.type}-${activity.id}`}
-              className="flex items-center justify-between gap-4 px-4 py-3"
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
-                  {activity.type === 'income' ? (
-                    <TrendingUp className="size-4" />
-                  ) : (
-                    <TrendingDown className="size-4" />
-                  )}
-                </div>
-
-                <div className="min-w-0">
-                  <p className="font-medium">
-                    {activity.type === 'income'
-                      ? 'Money received'
-                      : activity.category}
-                  </p>
-
-                  <p className="text-xs text-muted-foreground">
-                    {formatTime(activity.createdAt)}
-                  </p>
-                </div>
-              </div>
-
-              <p
-                className={`shrink-0 font-semibold ${
-                  activity.type === 'income'
-                    ? 'text-foreground'
-                    : 'text-muted-foreground'
-                }`}
-              >
-                {activity.type === 'income' ? '+' : '−'} UGX{' '}
-                {formatMoney(activity.amount)}
-              </p>
-            </div>
-          ))}
         </div>
       )}
     </section>
@@ -867,15 +530,8 @@ function SessionDetails({
   expenses: ExpenseEntry[]
   onBack: () => void
 }) {
-  const sessionIncome = getSessionIncome(
-    session.id,
-    income,
-  )
-
-  const sessionExpenses = getSessionExpenses(
-    session.id,
-    expenses,
-  )
+  const sessionIncome = getSessionIncome(session.id, income)
+  const sessionExpenses = getSessionExpenses(session.id, expenses)
 
   const received = sessionIncome.reduce(
     (total, entry) => total + entry.amount,
@@ -887,362 +543,162 @@ function SessionDetails({
     0,
   )
 
-  const fuelTotal = sessionExpenses
-    .filter(isFuelExpense)
+  const fuel = sessionExpenses
+    .filter(entry => entry.category.trim().toLowerCase() === 'fuel')
     .reduce((total, entry) => total + entry.amount, 0)
 
-  const made = received - expenseTotal
+  const started = new Date(session.startedAt)
+  const ended = session.endedAt ? new Date(session.endedAt) : new Date()
+
+  const duration = Math.max(
+    0,
+    Math.round((ended.getTime() - started.getTime()) / 60000),
+  )
+
+  const activity = [
+    ...sessionIncome.map(entry => ({
+      id: entry.id,
+      createdAt: entry.createdAt,
+      label: 'Received',
+      amount: entry.amount,
+      type: 'income' as const,
+    })),
+    ...sessionExpenses.map(entry => ({
+      id: entry.id,
+      createdAt: entry.createdAt,
+      label: entry.category,
+      amount: entry.amount,
+      type: 'expense' as const,
+    })),
+  ].sort(
+    (a, b) =>
+      new Date(b.createdAt).getTime() -
+      new Date(a.createdAt).getTime(),
+  )
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-6 pb-28">
+    <div className="mx-auto max-w-5xl space-y-5 px-4 py-6">
       <button
         type="button"
         onClick={onBack}
-        className="mb-5 inline-flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+        className="text-sm font-medium text-muted-foreground hover:text-foreground"
       >
-        <ArrowLeft className="size-4" />
-        Back to reports
+        ← Back to reports
       </button>
 
-      <div className="mb-5">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Session report
-        </p>
-
+      <div>
+        <p className="text-sm text-muted-foreground">Session report</p>
         <h1 className="mt-1 text-2xl font-bold">
-          {formatDate(session.startedAt)}
+          {formatDate(started)}
         </h1>
-
         <p className="mt-1 text-sm text-muted-foreground">
-          Complete financial report for this working period.
+          {formatTime(started)} –{' '}
+          {session.endedAt ? formatTime(ended) : 'Running'}
+          {' · '}
+          {formatDuration(duration)}
         </p>
       </div>
 
-      <div className="space-y-4">
-        <SessionOverview
-          session={session}
-          received={received}
-          expenses={expenseTotal}
-          made={made}
-          fuel={fuelTotal}
-        />
-
-        <FuelPerformance
-          session={session}
-          income={income}
-          expenses={expenses}
-        />
-
-        <ExpenseBreakdown expenses={sessionExpenses} />
-
-        <ActivityTimeline
-          income={sessionIncome}
-          expenses={sessionExpenses}
-        />
-      </div>
-    </main>
-  )
-}
-
-function SessionsList({
-  sessions,
-  income,
-  expenses,
-  onSelect,
-}: {
-  sessions: Session[]
-  income: IncomeEntry[]
-  expenses: ExpenseEntry[]
-  onSelect: (sessionId: string) => void
-}) {
-  const sortedSessions = [...sessions].sort(
-    (a, b) =>
-      new Date(b.startedAt).getTime() -
-      new Date(a.startedAt).getTime(),
-  )
-
-  if (sortedSessions.length === 0) {
-    return (
-      <div className="rounded-2xl border bg-background p-8 text-center">
-        <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-muted">
-          <Clock3 className="size-6" />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-2xl border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Received</p>
+          <p className="mt-2 text-xl font-bold">
+            UGX {formatMoney(received)}
+          </p>
         </div>
 
-        <p className="mt-4 font-semibold">
-          No completed sessions yet
-        </p>
+        <div className="rounded-2xl border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Expenses</p>
+          <p className="mt-2 text-xl font-bold">
+            UGX {formatMoney(expenseTotal)}
+          </p>
+        </div>
 
-        <p className="mt-1 text-sm text-muted-foreground">
-          Start working and complete a session to see its full
-          report here.
-        </p>
-      </div>
-    )
-  }
+        <div className="rounded-2xl border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Fuel</p>
+          <p className="mt-2 text-xl font-bold">
+            UGX {formatMoney(fuel)}
+          </p>
+        </div>
 
-  return (
-    <section className="rounded-2xl border bg-background">
-      <div className="border-b px-4 py-4">
-        <h2 className="font-semibold">
-          Completed sessions
-        </h2>
-
-        <p className="mt-1 text-xs text-muted-foreground">
-          Your actual working periods. Tap any session for its
-          complete report.
-        </p>
+        <div className="rounded-2xl border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Made</p>
+          <p className="mt-2 text-xl font-bold">
+            UGX {formatMoney(received - expenseTotal)}
+          </p>
+        </div>
       </div>
 
-      <div className="divide-y">
-        {sortedSessions.map((session) => {
-          const sessionIncome = getSessionIncome(
-            session.id,
-            income,
-          )
+      <section className="rounded-2xl border bg-card p-4">
+        <h2 className="font-semibold">Activity</h2>
 
-          const sessionExpenses = getSessionExpenses(
-            session.id,
-            expenses,
-          )
-
-          const received = sessionIncome.reduce(
-            (total, entry) => total + entry.amount,
-            0,
-          )
-
-          const expenseTotal = sessionExpenses.reduce(
-            (total, entry) => total + entry.amount,
-            0,
-          )
-
-          const made = received - expenseTotal
-
-          return (
-            <button
-              key={session.id}
-              type="button"
-              onClick={() => onSelect(session.id)}
-              className="group flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition-colors hover:bg-muted/50"
-            >
-              <div className="min-w-0">
-                <p className="font-semibold">
-                  {formatShortDate(session.startedAt)}
-                </p>
-
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  <span>
-                    {formatTime(session.startedAt)} –{' '}
-                    {session.endedAt
-                      ? formatTime(session.endedAt)
-                      : 'Running'}
-                  </span>
-
-                  <span>
-                    {formatDuration(
-                      session.startedAt,
-                      session.endedAt,
-                    )}
-                  </span>
-                </div>
-
-                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-                  <span className="text-sm font-semibold">
-                    UGX {formatMoney(made)} made
-                  </span>
-
-                  <span className="text-sm text-muted-foreground">
-                    UGX {formatMoney(received)} received
-                  </span>
-                </div>
-              </div>
-
-              <ChevronRight className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-            </button>
-          )
-        })}
-      </div>
-    </section>
-  )
-}
-
-function PeriodSessions({
-  period,
-  sessions,
-  income,
-  expenses,
-}: {
-  period: Exclude<ReportPeriod, 'sessions'>
-  sessions: Session[]
-  income: IncomeEntry[]
-  expenses: ExpenseEntry[]
-}) {
-  const range = getReportRange(period)
-
-  const overlapping = sessions
-    .filter((session) =>
-      overlapsRange(session.startedAt, session.endedAt, range),
-    )
-    .sort(
-      (a, b) =>
-        new Date(b.startedAt).getTime() -
-        new Date(a.startedAt).getTime(),
-    )
-
-  if (overlapping.length === 0) {
-    return (
-      <div className="rounded-2xl border bg-background p-8 text-center">
-        <CalendarDays className="mx-auto size-8 text-muted-foreground" />
-
-        <p className="mt-3 font-semibold">
-          No work in this period
-        </p>
-
-        <p className="mt-1 text-sm text-muted-foreground">
-          There are no sessions overlapping this period.
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <section className="rounded-2xl border bg-background">
-      <div className="border-b px-4 py-4">
-        <h2 className="font-semibold">
-          Sessions in this period
-        </h2>
-
-        <p className="mt-1 text-xs text-muted-foreground">
-          Sessions can cross midnight. Transactions belong to
-          the period in which they actually happened.
-        </p>
-      </div>
-
-      <div className="divide-y">
-        {overlapping.map((session) => {
-          const periodIncome = income.filter(
-            (entry) =>
-              entry.sessionId === session.id &&
-              isTransactionInRange(entry.createdAt, range),
-          )
-
-          const periodExpenses = expenses.filter(
-            (entry) =>
-              entry.sessionId === session.id &&
-              isTransactionInRange(entry.createdAt, range),
-          )
-
-          const received = periodIncome.reduce(
-            (total, entry) => total + entry.amount,
-            0,
-          )
-
-          const expenseTotal = periodExpenses.reduce(
-            (total, entry) => total + entry.amount,
-            0,
-          )
-
-          const workedMinutes = getOverlapMinutes(
-            session.startedAt,
-            session.endedAt,
-            range,
-          )
-
-          return (
-            <div
-              key={session.id}
-              className="px-4 py-4"
-            >
-              <div className="flex items-start justify-between gap-4">
+        {activity.length === 0 ? (
+          <p className="mt-4 text-sm text-muted-foreground">
+            No transactions recorded in this session.
+          </p>
+        ) : (
+          <div className="mt-3 divide-y">
+            {activity.map(item => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between gap-4 py-3"
+              >
                 <div>
-                  <p className="font-semibold">
-                    {formatShortDate(session.startedAt)}
-                  </p>
-
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {formatTime(session.startedAt)} –{' '}
-                    {session.endedAt
-                      ? formatTime(session.endedAt)
-                      : 'Running'}
-                  </p>
-                </div>
-
-                <div className="text-right">
-                  <p className="font-bold">
-                    UGX {formatMoney(received - expenseTotal)}
-                  </p>
-
+                  <p className="font-medium">{item.label}</p>
                   <p className="text-xs text-muted-foreground">
-                    made
+                    {formatTime(new Date(item.createdAt))}
                   </p>
                 </div>
+
+                <p
+                  className={`font-semibold ${
+                    item.type === 'expense'
+                      ? 'text-destructive'
+                      : 'text-foreground'
+                  }`}
+                >
+                  {item.type === 'expense' ? '-' : '+'}UGX{' '}
+                  {formatMoney(item.amount)}
+                </p>
               </div>
-
-              <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                <div className="rounded-lg bg-muted/60 p-3">
-                  <p className="text-muted-foreground">
-                    Received
-                  </p>
-
-                  <p className="mt-1 font-semibold">
-                    UGX {formatMoney(received)}
-                  </p>
-                </div>
-
-                <div className="rounded-lg bg-muted/60 p-3">
-                  <p className="text-muted-foreground">
-                    Expenses
-                  </p>
-
-                  <p className="mt-1 font-semibold">
-                    UGX {formatMoney(expenseTotal)}
-                  </p>
-                </div>
-
-                <div className="rounded-lg bg-muted/60 p-3">
-                  <p className="text-muted-foreground">
-                    Worked
-                  </p>
-
-                  <p className="mt-1 font-semibold">
-                    {formatDurationMinutes(workedMinutes)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </section>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
   )
 }
 
 export function ReportsScreen() {
   const {
-    activeSession,
     completedSessions,
+    activeSession,
     income,
     expenses,
   } = useApp()
 
-  const [period, setPeriod] =
-    useState<ReportPeriod>('sessions')
-
-  const [selectedSessionId, setSelectedSessionId] =
-    useState<string | null>(null)
+  const [period, setPeriod] = useState<ReportPeriod>('sessions')
+  const [anchor, setAnchor] = useState(new Date())
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
+    null,
+  )
 
   const allSessions = useMemo(() => {
     const sessions = [...completedSessions]
 
-    if (activeSession) {
+    if (
+      activeSession &&
+      !sessions.some(session => session.id === activeSession.id)
+    ) {
       sessions.push(activeSession)
     }
 
     return sessions
-  }, [activeSession, completedSessions])
+  }, [completedSessions, activeSession])
 
-  const selectedSession = allSessions.find(
-    (session) => session.id === selectedSessionId,
-  )
+  const selectedSession = selectedSessionId
+    ? allSessions.find(session => session.id === selectedSessionId) ?? null
+    : null
 
   if (selectedSession) {
     return (
@@ -1255,135 +711,236 @@ export function ReportsScreen() {
     )
   }
 
-  if (period === 'sessions') {
-    const received = income.reduce(
-      (total, entry) => total + entry.amount,
-      0,
-    )
+  const periodRange =
+    period === 'sessions'
+      ? null
+      : getReportRange(period, anchor)
 
-    const expenseTotal = expenses.reduce(
-      (total, entry) => total + entry.amount,
-      0,
-    )
+  const totals = periodRange
+    ? calculatePeriodTotals(
+        allSessions,
+        income,
+        expenses,
+        periodRange,
+      )
+    : null
 
-    const fuel = expenses
-      .filter(isFuelExpense)
-      .reduce((total, entry) => total + entry.amount, 0)
+  const sessionTotals = allSessions.reduce(
+    (result, session) => {
+      const sessionIncome = getSessionIncome(session.id, income)
+      const sessionExpenses = getSessionExpenses(session.id, expenses)
 
-    return (
-      <main className="mx-auto max-w-5xl px-4 py-6 pb-28">
-        <div className="mb-6">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Performance
-          </p>
+      result.received += sessionIncome.reduce(
+        (total, entry) => total + entry.amount,
+        0,
+      )
 
-          <h1 className="mt-1 text-2xl font-bold">
-            Reports
-          </h1>
+      result.expenses += sessionExpenses.reduce(
+        (total, entry) => total + entry.amount,
+        0,
+      )
 
-          <p className="mt-1 text-sm text-muted-foreground">
-            See what your work has produced.
-          </p>
-        </div>
-
-        <div className="space-y-5">
-          <ReportTabs
-            period={period}
-            onChange={setPeriod}
-          />
-
-          <SummaryCards
-            received={received}
-            expenses={expenseTotal}
-            made={received - expenseTotal}
-            fuel={fuel}
-            sessionCount={completedSessions.length}
-          />
-
-          <SessionsList
-            sessions={completedSessions}
-            income={income}
-            expenses={expenses}
-            onSelect={setSelectedSessionId}
-          />
-        </div>
-      </main>
-    )
-  }
-
-  const range = getReportRange(period)
-
-  const totals = calculatePeriodTotals(
-    allSessions,
-    income,
-    expenses,
-    range,
+      return result
+    },
+    {
+      received: 0,
+      expenses: 0,
+    },
   )
 
+  const sessionWorkedMinutes = allSessions.reduce(
+    (total, session) => {
+      const start = new Date(session.startedAt)
+      const end = session.endedAt
+        ? new Date(session.endedAt)
+        : new Date()
+
+      return (
+        total +
+        Math.max(
+          0,
+          Math.round((end.getTime() - start.getTime()) / 60000),
+        )
+      )
+    },
+    0,
+  )
+
+  const sessionFuel = allSessions
+    .flatMap(session => getSessionExpenses(session.id, expenses))
+    .filter(
+      expense =>
+        expense.category.trim().toLowerCase() === 'fuel',
+    )
+    .reduce((total, expense) => total + expense.amount, 0)
+
   return (
-    <main className="mx-auto max-w-5xl px-4 py-6 pb-28">
-      <div className="mb-6">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Performance
+    <div className="mx-auto max-w-6xl space-y-6 px-4 py-6">
+      <div>
+        <p className="text-sm font-medium text-muted-foreground">
+          PERFORMANCE
         </p>
-
-        <h1 className="mt-1 text-2xl font-bold">
-          Reports
-        </h1>
-
+        <h1 className="mt-1 text-2xl font-bold">Reports</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {period === 'day' && 'Today'}
-          {period === 'week' && 'This week'}
-          {period === 'month' && 'This month'}
-          {period === 'year' && 'This year'}
+          See what your work has produced.
         </p>
       </div>
 
-      <div className="space-y-5">
-        <ReportTabs
-          period={period}
-          onChange={setPeriod}
-        />
+      <ReportTabs
+        period={period}
+        onChange={nextPeriod => {
+          setPeriod(nextPeriod)
+          setSelectedSessionId(null)
+        }}
+      />
 
-        <SummaryCards
-          received={totals.received}
-          expenses={totals.expenses}
-          made={totals.made}
-          fuel={totals.fuel}
-          workedMinutes={totals.workedMinutes}
-          sessionCount={totals.sessionCount}
-        />
+      {period === 'sessions' ? (
+        <>
+          <SummaryCards
+            received={sessionTotals.received}
+            expenses={sessionTotals.expenses}
+            fuel={sessionFuel}
+            made={sessionTotals.received - sessionTotals.expenses}
+            workedMinutes={sessionWorkedMinutes}
+            sessionCount={allSessions.length}
+          />
 
-        <div className="rounded-2xl border bg-background p-4">
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
-              <CalendarDays className="size-5" />
-            </div>
-
+          <section className="space-y-3">
             <div>
-              <p className="font-semibold">
-                {formatRangeDate(range.start)}
-                {' – '}
-                {formatRangeDate(
-                  new Date(range.end.getTime() - 1),
-                )}
-              </p>
-
-              <p className="mt-1 text-xs text-muted-foreground">
-                Calendar reports use the actual time each
-                transaction happened.
+              <h2 className="text-lg font-semibold">
+                Completed sessions
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Your actual working periods.
               </p>
             </div>
-          </div>
-        </div>
 
-        <PeriodSessions
-          period={period}
-          sessions={allSessions}
-          income={income}
-          expenses={expenses}
-        />
-      </div>
-    </main>
+            {allSessions.length === 0 ? (
+              <div className="rounded-2xl border border-dashed p-8 text-center">
+                <p className="font-medium">No sessions yet</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Start working and your completed sessions will appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {[...allSessions]
+                  .sort(
+                    (a, b) =>
+                      new Date(b.startedAt).getTime() -
+                      new Date(a.startedAt).getTime(),
+                  )
+                  .map(session => {
+                    const sessionIncome = getSessionIncome(
+                      session.id,
+                      income,
+                    )
+
+                    const sessionExpenses = getSessionExpenses(
+                      session.id,
+                      expenses,
+                    )
+
+                    const received = sessionIncome.reduce(
+                      (total, entry) => total + entry.amount,
+                      0,
+                    )
+
+                    const expenseTotal = sessionExpenses.reduce(
+                      (total, entry) => total + entry.amount,
+                      0,
+                    )
+
+                    const started = new Date(session.startedAt)
+                    const ended = session.endedAt
+                      ? new Date(session.endedAt)
+                      : new Date()
+
+                    const minutes = Math.max(
+                      0,
+                      Math.round(
+                        (ended.getTime() - started.getTime()) / 60000,
+                      ),
+                    )
+
+                    return (
+                      <button
+                        key={session.id}
+                        type="button"
+                        onClick={() => setSelectedSessionId(session.id)}
+                        className="w-full rounded-2xl border bg-card p-4 text-left transition hover:bg-muted/40"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="font-semibold">
+                              {formatDate(started)}
+                            </p>
+
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {formatTime(started)} –{' '}
+                              {session.endedAt
+                                ? formatTime(ended)
+                                : 'Running'}
+                              {' · '}
+                              {formatDuration(minutes)}
+                            </p>
+
+                            <div className="mt-3 flex flex-wrap gap-4 text-sm">
+                              <span>
+                                UGX {formatMoney(received)} received
+                              </span>
+
+                              <span>
+                                UGX{' '}
+                                {formatMoney(received - expenseTotal)} made
+                              </span>
+                            </div>
+                          </div>
+
+                          <ChevronRight className="mt-1 size-5 shrink-0 text-muted-foreground" />
+                        </div>
+                      </button>
+                    )
+                  })}
+              </div>
+            )}
+          </section>
+        </>
+      ) : periodRange && totals ? (
+        <>
+          <PeriodSelector
+            period={period}
+            anchor={anchor}
+            onAnchorChange={setAnchor}
+          />
+
+          <div>
+            <p className="text-sm text-muted-foreground">
+              Report for
+            </p>
+            <h2 className="mt-1 text-xl font-bold">
+              {periodRange.label}
+            </h2>
+          </div>
+
+          <SummaryCards
+            received={totals.received}
+            expenses={totals.expenses}
+            fuel={totals.fuel}
+            made={totals.made}
+            workedMinutes={totals.workedMinutes}
+            sessionCount={totals.sessions.length}
+          />
+
+          <PeriodSessions
+            sessions={totals.sessions}
+            income={income}
+            expenses={expenses}
+            range={periodRange}
+            onSelect={setSelectedSessionId}
+          />
+        </>
+      ) : null}
+    </div>
   )
 }
