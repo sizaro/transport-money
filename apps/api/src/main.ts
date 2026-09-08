@@ -1,4 +1,4 @@
-import { NestFactory } from '@nestjs/core'
+﻿import { NestFactory } from '@nestjs/core'
 import { AppModule } from './app.module.js'
 
 async function bootstrap() {
@@ -6,9 +6,10 @@ async function bootstrap() {
 
   app.enableCors({
     origin: 'http://localhost:5173',
+    credentials: true,
   })
 
-  await app.listen(3000)
+  await app.listen(process.env.PORT ?? 3000)
 }
 
 bootstrap()

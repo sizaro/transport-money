@@ -1,0 +1,266 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum VehicleType {
+  BODA
+  VEHICLE
+}
+
+enum IncomeEntryMethod {
+  QUICK_AMOUNT
+  OTHER
+  CHANGE
+}
+
+enum QuickAmountType {
+  INCOME
+  EXPENSE
+  FARE
+  TENDER
+}
+
+enum SyncOperationType {
+  CREATE
+  UPDATE
+  VOID
+}
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users          User[]
+  vehicles       Vehicle[]
+  devices        Device[]
+  sessions       Session[]
+  incomeEntries  IncomeEntry[]
+  expenseEntries ExpenseEntry[]
+  changeEntries  ChangeEntry[]
+  quickAmounts   QuickAmount[]
+  syncOperations SyncOperation[]
+  authSessions   AuthSession[]
+}
+
+model User {
+  id        String   @id @default(uuid())
+  tenantId  String
+  phone     String   @unique
+  name      String
+  pinHash   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vehicles       Vehicle[]
+  devices        Device[]
+  sessions       Session[]
+  incomeEntries  IncomeEntry[]
+  expenseEntries ExpenseEntry[]
+  changeEntries  ChangeEntry[]
+  quickAmounts   QuickAmount[]
+  syncOperations SyncOperation[]
+  authSessions   AuthSession[]
+
+  @@index([tenantId])
+}
+
+model Vehicle {
+  id           String      @id @default(uuid())
+  tenantId     String
+  userId       String
+  type         VehicleType
+  subtype      String?
+  name         String?
+  registration String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions Session[]
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([tenantId, userId])
+}
+
+model Device {
+  id         String    @id @default(uuid())
+  tenantId   String
+  userId     String
+  name       String?
+  lastSeenAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  syncOperations SyncOperation[]
+  authSessions   AuthSession[]
+
+  @@index([tenantId, userId])
+}
+
+model Session {
+  id        String    @id @default(uuid())
+  tenantId  String
+  userId    String
+  vehicleId String
+  startedAt DateTime
+  endedAt   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicle        Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  incomeEntries  IncomeEntry[]
+  expenseEntries ExpenseEntry[]
+  changeEntries  ChangeEntry[]
+
+  @@index([tenantId, userId])
+  @@index([vehicleId])
+  @@index([startedAt])
+  @@index([endedAt])
+}
+
+model IncomeEntry {
+  id          String            @id @default(uuid())
+  tenantId    String
+  userId      String
+  sessionId   String
+  amount      Int
+  entryMethod IncomeEntryMethod
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  voidedAt    DateTime?
+
+  tenant  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session Session      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  change  ChangeEntry?
+
+  @@index([tenantId, userId])
+  @@index([sessionId, createdAt])
+  @@index([createdAt])
+  @@index([voidedAt])
+}
+
+model ExpenseEntry {
+  id        String    @id @default(uuid())
+  tenantId  String
+  userId    String
+  sessionId String
+  category  String
+  amount    Int
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  voidedAt  DateTime?
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId])
+  @@index([sessionId, createdAt])
+  @@index([category])
+  @@index([createdAt])
+  @@index([voidedAt])
+}
+
+model ChangeEntry {
+  id             String    @id @default(uuid())
+  tenantId       String
+  userId         String
+  sessionId      String
+  amountDue      Int
+  amountGiven    Int
+  changeReturned Int
+  amountReceived Int
+  incomeEntryId  String?   @unique
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  voidedAt       DateTime?
+
+  tenant  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session Session      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  income  IncomeEntry? @relation(fields: [incomeEntryId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, userId])
+  @@index([sessionId, createdAt])
+  @@index([createdAt])
+  @@index([voidedAt])
+}
+
+model QuickAmount {
+  id         String          @id @default(uuid())
+  tenantId   String
+  userId     String
+  type       QuickAmountType
+  category   String?
+  amount     Int
+  usageCount Int             @default(0)
+  lastUsedAt DateTime?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId, type])
+  @@index([lastUsedAt])
+}
+
+model SyncOperation {
+  id          String            @id
+  tenantId    String
+  userId      String
+  deviceId    String
+  entityType  String
+  entityId    String
+  operation   SyncOperationType
+  payload     Json
+  createdAt   DateTime          @default(now())
+  processedAt DateTime?
+  error       String?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, processedAt])
+  @@index([deviceId, createdAt])
+  @@index([entityType, entityId])
+}
+
+model AuthSession {
+  id         String    @id @default(uuid())
+  tenantId   String
+  userId     String
+  deviceId   String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId])
+  @@index([userId, revokedAt])
+  @@index([deviceId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+}

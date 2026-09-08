@@ -20,6 +20,7 @@ export interface IncomeEntry {
   sessionId: string
   amount: number
   createdAt: string
+  voidedAt?: string
 }
 
 export interface ExpenseEntry {
@@ -28,4 +29,5 @@ export interface ExpenseEntry {
   category: string
   amount: number
   createdAt: string
+  voidedAt?: string
 }

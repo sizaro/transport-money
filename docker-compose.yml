@@ -1,0 +1,21 @@
+﻿services:
+  postgres:
+    image: postgres:17
+    container_name: transport-money-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: transport_money
+      POSTGRES_PASSWORD: transport_money_dev
+      POSTGRES_DB: transport_money
+    ports:
+      - "5434:5432"
+    volumes:
+      - transport-money-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U transport_money -d transport_money"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  transport-money-postgres-data:

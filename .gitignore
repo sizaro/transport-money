@@ -12,3 +12,5 @@ Thumbs.db
 .vscode/
 
 *.tsbuildinfo
+
+apps/api/.env

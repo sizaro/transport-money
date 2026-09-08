@@ -1,23 +1,31 @@
 import { Test, TestingModule } from '@nestjs/testing'
+import { describe, expect, it } from 'vitest'
 import { AppController } from './app.controller.js'
+import { PrismaService } from './database/prisma.service.js'
 
 describe('AppController', () => {
-  let appController: AppController
+  it('should return the API health status', async () => {
+    const prismaMock = {
+      $queryRaw: async () => [{ '?column?': 1 }],
+    }
 
-  beforeEach(async () => {
-    const app: TestingModule = await Test.createTestingModule({
+    const module: TestingModule = await Test.createTestingModule({
       controllers: [AppController],
+      providers: [
+        {
+          provide: PrismaService,
+          useValue: prismaMock,
+        },
+      ],
     }).compile()
 
-    appController = app.get<AppController>(AppController)
-  })
+    const controller = module.get<AppController>(AppController)
 
-  describe('health', () => {
-    it('should return the API health status', () => {
-      expect(appController.health()).toEqual({
-        status: 'ok',
-        service: 'transport-money-api',
-      })
-    })
+    const result = await controller.health()
+
+    expect(result.status).toBe('ok')
+    expect(result.service).toBe('transport-money-api')
+    expect(result.database).toBe('ok')
+    expect(result.responseTimeMs).toEqual(expect.any(Number))
   })
 })
