@@ -1,236 +1,410 @@
-﻿import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-} from 'react'
+﻿import { createContext, useContext, useEffect, useRef, useState } from "react";
 
 import {
   enqueueSync,
   getActiveSession,
+  getAuth,
   getChangeEntries,
   getCompletedSessions,
   getExpenses,
   getIncome,
   getOnboarding,
+  isLocalDatabaseInitialized,
+  markLocalDatabaseInitialized,
   saveActiveSession,
   saveChangeEntries,
   saveCompletedSessions,
   saveExpenses,
   saveIncome,
   saveOnboarding,
+  type AuthState,
   type SyncOperation,
-} from '@/db/indexedDb'
+} from "@/db/indexedDb";
 
 import type {
   ExpenseEntry,
   IncomeEntry,
   OnboardingData,
   Session,
-} from '@/types/app'
+} from "@/types/app";
 
-import { startSyncEngine } from '@/lib/sync'
+import { startSyncEngine } from "@/lib/sync";
 
 export interface ChangeEntry {
-  id: string
-  sessionId: string
-  amountDue: number
-  amountGiven: number
-  changeReturned: number
-  amountReceived: number
-  createdAt: string
-  voidedAt?: string
+  id: string;
+  sessionId: string;
+  amountDue: number;
+  amountGiven: number;
+  changeReturned: number;
+  amountReceived: number;
+  createdAt: string;
+  voidedAt?: string;
+  incomeEntryId?: string;
 }
 
 interface AppContextValue {
-  onboarding: OnboardingData | null
-  activeSession: Session | null
-  completedSessions: Session[]
-  income: IncomeEntry[]
-  expenses: ExpenseEntry[]
-  changeEntries: ChangeEntry[]
-  completeOnboarding: (data: OnboardingData) => void
-  startSession: () => void
-  endSession: () => void
-  addIncome: (amount: number) => void
-  undoIncome: () => void
-  addExpense: (category: string, amount: number) => void
-  undoExpense: () => void
-  addChange: (
-    amountDue: number,
-    amountGiven: number,
-  ) => void
+  auth: AuthState | null;
+  onboarding: OnboardingData | null;
+  activeSession: Session | null;
+  completedSessions: Session[];
+  income: IncomeEntry[];
+  expenses: ExpenseEntry[];
+  changeEntries: ChangeEntry[];
+  completeOnboarding: (data: OnboardingData) => void;
+  startSession: () => void;
+  endSession: () => void;
+  addIncome: (amount: number) => void;
+  undoIncome: () => void;
+  addExpense: (category: string, amount: number) => void;
+  undoExpense: () => void;
+  addChange: (amountDue: number, amountGiven: number) => void;
 }
 
-const AppContext = createContext<AppContextValue | null>(null)
+const AppContext = createContext<AppContextValue | null>(null);
 
 function now(): string {
-  return new Date().toISOString()
+  return new Date().toISOString();
 }
 
 function uuid(): string {
-  return crypto.randomUUID()
+  return crypto.randomUUID();
 }
 
-export function AppProvider({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  const [onboarding, setOnboarding] =
-    useState<OnboardingData | null>(null)
+function calculateSessionReceived(
+  sessionId: string,
+  income: IncomeEntry[],
+): number {
+  return income
+    .filter((entry) => entry.sessionId === sessionId && !entry.voidedAt)
+    .reduce((total, entry) => total + entry.amount, 0);
+}
 
-  const [activeSession, setActiveSession] =
-    useState<Session | null>(null)
+function calculateSessionExpenses(
+  sessionId: string,
+  expenses: ExpenseEntry[],
+): number {
+  return expenses
+    .filter((entry) => entry.sessionId === sessionId && !entry.voidedAt)
+    .reduce((total, entry) => total + entry.amount, 0);
+}
 
-  const [completedSessions, setCompletedSessions] =
-    useState<Session[]>([])
+function buildSessionWithTotals(
+  session: Session,
+  income: IncomeEntry[],
+  expenses: ExpenseEntry[],
+): Session {
+  return {
+    ...session,
+    received: calculateSessionReceived(session.id, income),
+    expenses: calculateSessionExpenses(session.id, expenses),
+  };
+}
 
-  const [income, setIncome] =
-    useState<IncomeEntry[]>([])
+export function AppProvider({ children }: { children: React.ReactNode }) {
+  const [hydrated, setHydrated] = useState(false);
 
-  const [expenses, setExpenses] =
-    useState<ExpenseEntry[]>([])
+  const [auth, setAuth] = useState<AuthState | null>(null);
 
-  const [changeEntries, setChangeEntries] =
-    useState<ChangeEntry[]>([])
+  const [onboarding, setOnboarding] = useState<OnboardingData | null>(null);
+
+  const [activeSession, setActiveSession] = useState<Session | null>(null);
+
+  const [completedSessions, setCompletedSessions] = useState<Session[]>([]);
+
+  const [income, setIncome] = useState<IncomeEntry[]>([]);
+
+  const [expenses, setExpenses] = useState<ExpenseEntry[]>([]);
+
+  const [changeEntries, setChangeEntries] = useState<ChangeEntry[]>([]);
+
+  /*
+   * These refs mirror React state and are updated
+   * immediately inside mutations.
+   *
+   * This prevents rapid taps from calculating the next
+   * operation from stale React state.
+   */
+  const activeSessionRef = useRef<Session | null>(null);
+
+  const completedSessionsRef = useRef<Session[]>([]);
+
+  const incomeRef = useRef<IncomeEntry[]>([]);
+
+  const expensesRef = useRef<ExpenseEntry[]>([]);
+
+  const changeEntriesRef = useRef<ChangeEntry[]>([]);
+
+  /*
+   * Local persistence is serialized.
+   *
+   * The UI changes immediately, while IndexedDB writes
+   * happen in the same order as the user's actions.
+   */
+  const persistenceChainRef = useRef<Promise<void>>(Promise.resolve());
+
+  function persist(operation: () => Promise<void>) {
+    persistenceChainRef.current = persistenceChainRef.current
+      .then(operation)
+      .catch((error) => {
+        console.error("Local persistence failed:", error);
+      });
+  }
 
   useEffect(() => {
-    let mounted = true
+    let mounted = true;
 
     async function load() {
-      const [
-        savedOnboarding,
-        savedActive,
-        savedCompleted,
-        savedIncome,
-        savedExpenses,
-        savedChanges,
-      ] = await Promise.all([
-        getOnboarding(),
-        getActiveSession(),
-        getCompletedSessions(),
-        getIncome(),
-        getExpenses(),
-        getChangeEntries(),
-      ])
+      try {
+        const [
+          savedAuth,
+          savedOnboarding,
+          savedActive,
+          savedCompleted,
+          savedIncome,
+          savedExpenses,
+          savedChanges,
+          initialized,
+        ] = await Promise.all([
+          getAuth(),
+          getOnboarding(),
+          getActiveSession(),
+          getCompletedSessions(),
+          getIncome(),
+          getExpenses(),
+          getChangeEntries(),
+          isLocalDatabaseInitialized(),
+        ]);
 
-      if (!mounted) return
+        if (!mounted) return;
 
-      setOnboarding(savedOnboarding)
-      setActiveSession(savedActive)
-      setCompletedSessions(savedCompleted)
-      setIncome(savedIncome)
-      setExpenses(savedExpenses)
-      setChangeEntries(savedChanges)
+        /*
+         * Auth is also local application state.
+         *
+         * Load it before the application is rendered so
+         * the router can determine whether the user is
+         * already authenticated.
+         */
+        setAuth(savedAuth);
+
+        /*
+         * The actual transaction entries are the source
+         * of truth.
+         *
+         * Rebuild session totals from those entries instead
+         * of trusting cached session totals.
+         */
+        const rebuiltActive = savedActive
+          ? buildSessionWithTotals(savedActive, savedIncome, savedExpenses)
+          : null;
+
+        const rebuiltCompleted = savedCompleted.map((session) =>
+          buildSessionWithTotals(session, savedIncome, savedExpenses),
+        );
+
+        activeSessionRef.current = rebuiltActive;
+
+        completedSessionsRef.current = rebuiltCompleted;
+
+        incomeRef.current = savedIncome;
+
+        expensesRef.current = savedExpenses;
+
+        changeEntriesRef.current = savedChanges;
+
+        setOnboarding(savedOnboarding);
+        setActiveSession(rebuiltActive);
+        setCompletedSessions(rebuiltCompleted);
+        setIncome(savedIncome);
+        setExpenses(savedExpenses);
+        setChangeEntries(savedChanges);
+
+        /*
+         * Existing users may have data from an older
+         * IndexedDB version before the initialized marker
+         * existed.
+         *
+         * Existing local data means the local database
+         * must remain authoritative.
+         */
+        const hasExistingLocalState =
+          initialized ||
+          savedAuth !== null ||
+          savedOnboarding !== null ||
+          savedActive !== null ||
+          savedCompleted.length > 0 ||
+          savedIncome.length > 0 ||
+          savedExpenses.length > 0 ||
+          savedChanges.length > 0;
+
+        if (hasExistingLocalState && !initialized) {
+          await markLocalDatabaseInitialized();
+        }
+
+        if (!mounted) return;
+
+        /*
+         * Do not allow the application UI to render before
+         * IndexedDB has finished loading.
+         */
+        setHydrated(true);
+      } catch (error) {
+        console.error("Failed to hydrate local application state:", error);
+
+        if (mounted) {
+          /*
+           * We allow the application to render after the
+           * load attempt finishes, but we do not replace
+           * local data with server data.
+           */
+          setHydrated(true);
+        }
+      }
     }
 
-    void load()
-
-    const stopSync = startSyncEngine()
+    void load();
 
     return () => {
-      mounted = false
-      stopSync()
-    }
-  }, [])
+      mounted = false;
+    };
+  }, []);
+
+  /*
+   * Start synchronization only after IndexedDB hydration
+   * has completed.
+   */
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const stopSync = startSyncEngine();
+
+    return () => {
+      stopSync();
+    };
+  }, [hydrated]);
 
   function completeOnboarding(data: OnboardingData) {
-    setOnboarding(data)
-    void saveOnboarding(data)
+    setOnboarding(data);
+
+    persist(async () => {
+      await saveOnboarding(data);
+      await markLocalDatabaseInitialized();
+    });
   }
 
   function startSession() {
-    if (activeSession) return
+    if (activeSessionRef.current) return;
 
     const session: Session = {
       id: uuid(),
       startedAt: now(),
       received: 0,
       expenses: 0,
-    }
+    };
 
-    setActiveSession(session)
-    void saveActiveSession(session)
+    activeSessionRef.current = session;
+
+    setActiveSession(session);
 
     const operation: SyncOperation = {
       id: uuid(),
-      entityType: 'session',
+      entityType: "session",
       entityId: session.id,
-      operation: 'CREATE',
+      operation: "CREATE",
       payload: {
         id: session.id,
         startedAt: session.startedAt,
       },
       createdAt: now(),
-    }
+    };
 
-    void enqueueSync(operation)
+    persist(async () => {
+      await saveActiveSession(session);
+      await enqueueSync(operation);
+    });
   }
 
   function endSession() {
-    if (!activeSession) return
+    const currentSession = activeSessionRef.current;
 
-    const endedAt = now()
+    if (!currentSession) return;
 
-    const completedSession: Session = {
-      ...activeSession,
-      endedAt,
-    }
+    const endedAt = now();
 
-    const nextCompleted = [
-      ...completedSessions,
-      completedSession,
-    ]
+    const completedSession = buildSessionWithTotals(
+      {
+        ...currentSession,
+        endedAt,
+      },
+      incomeRef.current,
+      expensesRef.current,
+    );
 
-    setCompletedSessions(nextCompleted)
-    setActiveSession(null)
+    const nextCompleted = [...completedSessionsRef.current, completedSession];
 
-    void saveCompletedSessions(nextCompleted)
-    void saveActiveSession(null)
+    activeSessionRef.current = null;
+
+    completedSessionsRef.current = nextCompleted;
+
+    setActiveSession(null);
+    setCompletedSessions(nextCompleted);
 
     const operation: SyncOperation = {
       id: uuid(),
-      entityType: 'session',
-      entityId: activeSession.id,
-      operation: 'UPDATE',
+      entityType: "session",
+      entityId: currentSession.id,
+      operation: "UPDATE",
       payload: {
         endedAt,
       },
       createdAt: now(),
-    }
+    };
 
-    void enqueueSync(operation)
+    persist(async () => {
+      await saveCompletedSessions(nextCompleted);
+
+      await saveActiveSession(null);
+
+      await enqueueSync(operation);
+    });
   }
 
   function addIncome(amount: number) {
-    if (!activeSession || amount <= 0) return
+    const currentSession = activeSessionRef.current;
+
+    if (!currentSession || amount <= 0) {
+      return;
+    }
 
     const entry: IncomeEntry = {
       id: uuid(),
-      sessionId: activeSession.id,
+      sessionId: currentSession.id,
       amount,
       createdAt: now(),
-    }
+    };
 
-    const nextIncome = [...income, entry]
+    /*
+     * Every tap is an independent transaction.
+     */
+    const nextIncome = [...incomeRef.current, entry];
 
-    const nextSession: Session = {
-      ...activeSession,
-      received: activeSession.received + amount,
-    }
+    incomeRef.current = nextIncome;
 
-    setIncome(nextIncome)
-    setActiveSession(nextSession)
+    const nextSession = buildSessionWithTotals(
+      currentSession,
+      nextIncome,
+      expensesRef.current,
+    );
 
-    void saveIncome(nextIncome)
-    void saveActiveSession(nextSession)
+    activeSessionRef.current = nextSession;
+
+    setIncome(nextIncome);
+    setActiveSession(nextSession);
 
     const operation: SyncOperation = {
       id: uuid(),
-      entityType: 'income',
+      entityType: "income",
       entityId: entry.id,
-      operation: 'CREATE',
+      operation: "CREATE",
       payload: {
         id: entry.id,
         sessionId: entry.sessionId,
@@ -238,97 +412,122 @@ export function AppProvider({
         createdAt: entry.createdAt,
       },
       createdAt: now(),
-    }
+    };
 
-    void enqueueSync(operation)
+    persist(async () => {
+      await saveIncome(nextIncome);
+      await saveActiveSession(nextSession);
+      await enqueueSync(operation);
+    });
   }
 
   function undoIncome() {
-    if (!activeSession) return
+    const currentSession = activeSessionRef.current;
 
-    const sessionIncome = income.filter(
-      (entry) =>
-        entry.sessionId === activeSession.id,
-    )
+    if (!currentSession) return;
 
-    if (sessionIncome.length === 0) return
+    const sessionIncome = incomeRef.current.filter(
+      (entry) => entry.sessionId === currentSession.id && !entry.voidedAt,
+    );
 
-    const last =
-      sessionIncome[sessionIncome.length - 1]
-
-    const voidedAt = now()
-
-    const nextIncome = income.map((entry) =>
-      entry.id === last.id
-        ? { ...entry, voidedAt }
-        : entry,
-    )
-
-    const nextSession: Session = {
-      ...activeSession,
-      received: Math.max(
-        0,
-        activeSession.received - last.amount,
-      ),
+    if (sessionIncome.length === 0) {
+      return;
     }
 
-    setIncome(nextIncome)
-    setActiveSession(nextSession)
+    const last = sessionIncome[sessionIncome.length - 1];
 
-    void saveIncome(nextIncome)
-    void saveActiveSession(nextSession)
+    const voidedAt = now();
 
-    void enqueueSync({
+    const nextIncome = incomeRef.current.map((entry) =>
+      entry.id === last.id
+        ? {
+            ...entry,
+            voidedAt,
+          }
+        : entry,
+    );
+
+    const nextChanges = changeEntriesRef.current.map((change) =>
+      change.incomeEntryId === last.id
+        ? {
+            ...change,
+            voidedAt,
+          }
+        : change,
+    );
+
+    incomeRef.current = nextIncome;
+
+    changeEntriesRef.current = nextChanges;
+
+    const nextSession = buildSessionWithTotals(
+      currentSession,
+      nextIncome,
+      expensesRef.current,
+    );
+
+    activeSessionRef.current = nextSession;
+
+    setIncome(nextIncome);
+    setChangeEntries(nextChanges);
+    setActiveSession(nextSession);
+
+    const operation: SyncOperation = {
       id: uuid(),
-      entityType: 'income',
+      entityType: "income",
       entityId: last.id,
-      operation: 'VOID',
+      operation: "VOID",
       payload: {
         voidedAt,
       },
       createdAt: now(),
-    })
+    };
+
+    persist(async () => {
+      await saveIncome(nextIncome);
+      await saveChangeEntries(nextChanges);
+      await saveActiveSession(nextSession);
+      await enqueueSync(operation);
+    });
   }
 
-  function addExpense(
-    category: string,
-    amount: number,
-  ) {
-    if (
-      !activeSession ||
-      amount <= 0 ||
-      !category.trim()
-    ) {
-      return
+  function addExpense(category: string, amount: number) {
+    const currentSession = activeSessionRef.current;
+
+    const normalizedCategory = category.trim();
+
+    if (!currentSession || amount <= 0 || !normalizedCategory) {
+      return;
     }
 
     const entry: ExpenseEntry = {
       id: uuid(),
-      sessionId: activeSession.id,
-      category: category.trim(),
+      sessionId: currentSession.id,
+      category: normalizedCategory,
       amount,
       createdAt: now(),
-    }
+    };
 
-    const nextExpenses = [...expenses, entry]
+    const nextExpenses = [...expensesRef.current, entry];
 
-    const nextSession: Session = {
-      ...activeSession,
-      expenses:
-        activeSession.expenses + amount,
-    }
+    expensesRef.current = nextExpenses;
 
-    setExpenses(nextExpenses)
-    setActiveSession(nextSession)
+    const nextSession = buildSessionWithTotals(
+      currentSession,
+      incomeRef.current,
+      nextExpenses,
+    );
 
-    void saveExpenses(nextExpenses)
-    void saveActiveSession(nextSession)
+    activeSessionRef.current = nextSession;
 
-    void enqueueSync({
+    setExpenses(nextExpenses);
+    setActiveSession(nextSession);
+
+    const operation: SyncOperation = {
       id: uuid(),
-      entityType: 'expense',
+      entityType: "expense",
       entityId: entry.id,
-      operation: 'CREATE',
+      operation: "CREATE",
       payload: {
         id: entry.id,
         sessionId: entry.sessionId,
@@ -337,119 +536,128 @@ export function AppProvider({
         createdAt: entry.createdAt,
       },
       createdAt: now(),
-    })
+    };
+
+    persist(async () => {
+      await saveExpenses(nextExpenses);
+      await saveActiveSession(nextSession);
+      await enqueueSync(operation);
+    });
   }
 
   function undoExpense() {
-    if (!activeSession) return
+    const currentSession = activeSessionRef.current;
 
-    const sessionExpenses = expenses.filter(
-      (entry) =>
-        entry.sessionId === activeSession.id &&
-        !entry.voidedAt,
-    )
+    if (!currentSession) return;
 
-    if (sessionExpenses.length === 0) return
+    const sessionExpenses = expensesRef.current.filter(
+      (entry) => entry.sessionId === currentSession.id && !entry.voidedAt,
+    );
 
-    const last =
-      sessionExpenses[sessionExpenses.length - 1]
-
-    const voidedAt = now()
-
-    const nextExpenses = expenses.map((entry) =>
-      entry.id === last.id
-        ? { ...entry, voidedAt }
-        : entry,
-    )
-
-    const nextSession: Session = {
-      ...activeSession,
-      expenses: Math.max(
-        0,
-        activeSession.expenses - last.amount,
-      ),
+    if (sessionExpenses.length === 0) {
+      return;
     }
 
-    setExpenses(nextExpenses)
-    setActiveSession(nextSession)
+    const last = sessionExpenses[sessionExpenses.length - 1];
 
-    void saveExpenses(nextExpenses)
-    void saveActiveSession(nextSession)
+    const voidedAt = now();
 
-    void enqueueSync({
+    const nextExpenses = expensesRef.current.map((entry) =>
+      entry.id === last.id
+        ? {
+            ...entry,
+            voidedAt,
+          }
+        : entry,
+    );
+
+    expensesRef.current = nextExpenses;
+
+    const nextSession = buildSessionWithTotals(
+      currentSession,
+      incomeRef.current,
+      nextExpenses,
+    );
+
+    activeSessionRef.current = nextSession;
+
+    setExpenses(nextExpenses);
+    setActiveSession(nextSession);
+
+    const operation: SyncOperation = {
       id: uuid(),
-      entityType: 'expense',
+      entityType: "expense",
       entityId: last.id,
-      operation: 'VOID',
+      operation: "VOID",
       payload: {
         voidedAt,
       },
       createdAt: now(),
-    })
+    };
+
+    persist(async () => {
+      await saveExpenses(nextExpenses);
+      await saveActiveSession(nextSession);
+      await enqueueSync(operation);
+    });
   }
 
-  function addChange(
-    amountDue: number,
-    amountGiven: number,
-  ) {
-    if (!activeSession) return
-    if (
-      amountDue <= 0 ||
-      amountGiven < amountDue
-    ) {
-      return
+  function addChange(amountDue: number, amountGiven: number) {
+    const currentSession = activeSessionRef.current;
+
+    if (!currentSession) return;
+
+    if (amountDue <= 0 || amountGiven < amountDue) {
+      return;
     }
 
-    const createdAt = now()
-    const changeReturned =
-      amountGiven - amountDue
+    const createdAt = now();
+
+    const changeReturned = amountGiven - amountDue;
+
+    const incomeEntry: IncomeEntry = {
+      id: uuid(),
+      sessionId: currentSession.id,
+      amount: amountDue,
+      createdAt,
+    };
 
     const change: ChangeEntry = {
       id: uuid(),
-      sessionId: activeSession.id,
+      sessionId: currentSession.id,
       amountDue,
       amountGiven,
       changeReturned,
       amountReceived: amountDue,
       createdAt,
-    }
+      incomeEntryId: incomeEntry.id,
+    };
 
-    const incomeEntry: IncomeEntry = {
+    const nextIncome = [...incomeRef.current, incomeEntry];
+
+    const nextChanges = [...changeEntriesRef.current, change];
+
+    incomeRef.current = nextIncome;
+
+    changeEntriesRef.current = nextChanges;
+
+    const nextSession = buildSessionWithTotals(
+      currentSession,
+      nextIncome,
+      expensesRef.current,
+    );
+
+    activeSessionRef.current = nextSession;
+
+    setIncome(nextIncome);
+    setChangeEntries(nextChanges);
+    setActiveSession(nextSession);
+
+    const operation: SyncOperation = {
       id: uuid(),
-      sessionId: activeSession.id,
-      amount: amountDue,
-      createdAt,
-    }
-
-    const nextChanges = [
-      ...changeEntries,
-      change,
-    ]
-
-    const nextIncome = [
-      ...income,
-      incomeEntry,
-    ]
-
-    const nextSession: Session = {
-      ...activeSession,
-      received:
-        activeSession.received + amountDue,
-    }
-
-    setChangeEntries(nextChanges)
-    setIncome(nextIncome)
-    setActiveSession(nextSession)
-
-    void saveChangeEntries(nextChanges)
-    void saveIncome(nextIncome)
-    void saveActiveSession(nextSession)
-
-    void enqueueSync({
-      id: uuid(),
-      entityType: 'change',
+      entityType: "change",
       entityId: change.id,
-      operation: 'CREATE',
+      operation: "CREATE",
       payload: {
         id: change.id,
         incomeEntryId: incomeEntry.id,
@@ -459,12 +667,40 @@ export function AppProvider({
         createdAt: change.createdAt,
       },
       createdAt,
-    })
+    };
+
+    persist(async () => {
+      await saveChangeEntries(nextChanges);
+      await saveIncome(nextIncome);
+      await saveActiveSession(nextSession);
+      await enqueueSync(operation);
+    });
+  }
+
+  /*
+   * Do not render the application before local state
+   * has been hydrated.
+   */
+  if (!hydrated) {
+    return (
+      <main className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-xl font-semibold text-gray-900">
+            Transport Money
+          </h1>
+
+          <p className="mt-2 text-sm text-gray-500">
+            Loading your local data...
+          </p>
+        </div>
+      </main>
+    );
   }
 
   return (
     <AppContext.Provider
       value={{
+        auth,
         onboarding,
         activeSession,
         completedSessions,
@@ -483,17 +719,15 @@ export function AppProvider({
     >
       {children}
     </AppContext.Provider>
-  )
+  );
 }
 
 export function useApp() {
-  const context = useContext(AppContext)
+  const context = useContext(AppContext);
 
   if (!context) {
-    throw new Error(
-      'useApp must be used inside AppProvider',
-    )
+    throw new Error("useApp must be used inside AppProvider");
   }
 
-  return context
+  return context;
 }
