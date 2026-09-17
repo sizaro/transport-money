@@ -1,100 +1,109 @@
-﻿import { FormEvent, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useApp } from '@/app/providers'
-import { apiLogin, apiRegister } from '@/lib/api'
+﻿import { FormEvent, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useApp } from "@/app/providers";
+import { apiLogin, apiRegister } from "@/lib/api";
 
-type Mode = 'login' | 'register'
+type Mode = "login" | "register";
 
 export function AuthScreen() {
-  const navigate = useNavigate()
-  const { completeOnboarding } = useApp()
+  const navigate = useNavigate();
+  const { completeOnboarding } = useApp();
 
-  const [mode, setMode] = useState<Mode>('login')
-  const [name, setName] = useState('')
-  const [phone, setPhone] = useState('')
-  const [pin, setPin] = useState('')
-  const [vehicleType, setVehicleType] = useState<'boda' | 'vehicle'>('boda')
-  const [deviceName, setDeviceName] = useState('Transport Money')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [mode, setMode] = useState<Mode>("login");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [pin, setPin] = useState("");
+  const [vehicleType, setVehicleType] = useState<"boda" | "vehicle">("boda");
+  const [deviceName, setDeviceName] = useState("Transport Money");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   function switchMode(nextMode: Mode) {
-    setMode(nextMode)
-    setError('')
-    setPin('')
+    setMode(nextMode);
+    setError("");
+    setPin("");
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setError('')
+    event.preventDefault();
+    setError("");
 
     if (!phone.trim()) {
-      setError('Enter your phone number.')
-      return
+      setError("Enter your phone number.");
+      return;
     }
 
     if (!/^\d{4}$/.test(pin)) {
-      setError('PIN must be exactly 4 digits.')
-      return
+      setError("PIN must be exactly 4 digits.");
+      return;
     }
 
-    if (mode === 'register' && !name.trim()) {
-      setError('Enter your name.')
-      return
+    if (mode === "register" && !name.trim()) {
+      setError("Enter your name.");
+      return;
     }
 
-    setLoading(true)
+    setLoading(true);
 
     try {
-      if (mode === 'register') {
+      if (mode === "register") {
         await apiRegister({
           phone,
           name: name.trim(),
           pin,
-          vehicleType: vehicleType === 'boda' ? 'BODA' : 'VEHICLE',
-        })
+          vehicleType: vehicleType === "boda" ? "BODA" : "VEHICLE",
+        });
 
-        await apiLogin({
+        const result = await apiLogin({
           phone,
           pin,
-          deviceName: deviceName.trim() || 'Transport Money',
-        })
+          deviceName: deviceName.trim() || "Transport Money",
+        });
+
+        const resolvedVehicleType =
+          result.vehicle.type === "BODA" ? "boda" : "vehicle";
 
         completeOnboarding({
-          vehicleType,
+          vehicleType: resolvedVehicleType,
           phone: phone.trim(),
-          name: name.trim(),
+          name: result.user.name,
           completed: true,
-        })
+        });
+
+        navigate(
+          resolvedVehicleType === "boda" ? "/boda/working" : "/vehicle",
+          { replace: true },
+        );
       } else {
         const result = await apiLogin({
           phone,
           pin,
-          deviceName: deviceName.trim() || 'Transport Money',
-        })
+          deviceName: deviceName.trim() || "Transport Money",
+        });
+
+        const resolvedVehicleType =
+          result.vehicle.type === "BODA" ? "boda" : "vehicle";
 
         completeOnboarding({
-          vehicleType,
+          vehicleType: resolvedVehicleType,
           phone: phone.trim(),
           name: result.user.name,
           completed: true,
-        })
-      }
+        });
 
-      navigate(
-        vehicleType === 'boda'
-          ? '/boda/working'
-          : '/vehicle',
-        { replace: true },
-      )
+        navigate(
+          resolvedVehicleType === "boda" ? "/boda/working" : "/vehicle",
+          { replace: true },
+        );
+      }
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
-          : 'Something went wrong. Please try again.',
-      )
+          : "Something went wrong. Please try again.",
+      );
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
@@ -108,18 +117,18 @@ export function AuthScreen() {
             </p>
 
             <h1 className="mt-2 text-3xl font-bold tracking-tight">
-              {mode === 'login' ? 'Welcome back' : 'Create your account'}
+              {mode === "login" ? "Welcome back" : "Create your account"}
             </h1>
 
             <p className="mt-2 text-sm text-muted-foreground">
-              {mode === 'login'
-                ? 'Sign in and continue managing your work.'
-                : 'Set up your Transport Money account.'}
+              {mode === "login"
+                ? "Sign in and continue managing your work."
+                : "Set up your Transport Money account."}
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            {mode === 'register' && (
+            {mode === "register" && (
               <div>
                 <label
                   htmlFor="name"
@@ -140,10 +149,7 @@ export function AuthScreen() {
             )}
 
             <div>
-              <label
-                htmlFor="phone"
-                className="mb-2 block text-sm font-medium"
-              >
+              <label htmlFor="phone" className="mb-2 block text-sm font-medium">
                 Phone number
               </label>
 
@@ -159,10 +165,7 @@ export function AuthScreen() {
             </div>
 
             <div>
-              <label
-                htmlFor="pin"
-                className="mb-2 block text-sm font-medium"
-              >
+              <label htmlFor="pin" className="mb-2 block text-sm font-medium">
                 4-digit PIN
               </label>
 
@@ -170,18 +173,12 @@ export function AuthScreen() {
                 id="pin"
                 value={pin}
                 onChange={(event) =>
-                  setPin(
-                    event.target.value
-                      .replace(/\D/g, '')
-                      .slice(0, 4),
-                  )
+                  setPin(event.target.value.replace(/\D/g, "").slice(0, 4))
                 }
                 placeholder="••••"
                 inputMode="numeric"
                 autoComplete={
-                  mode === 'login'
-                    ? 'current-password'
-                    : 'new-password'
+                  mode === "login" ? "current-password" : "new-password"
                 }
                 maxLength={4}
                 type="password"
@@ -189,7 +186,7 @@ export function AuthScreen() {
               />
             </div>
 
-            {mode === 'register' && (
+            {mode === "register" && (
               <>
                 <div>
                   <label className="mb-2 block text-sm font-medium">
@@ -199,11 +196,11 @@ export function AuthScreen() {
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
-                      onClick={() => setVehicleType('boda')}
+                      onClick={() => setVehicleType("boda")}
                       className={`rounded-xl border px-4 py-3 text-sm font-medium ${
-                        vehicleType === 'boda'
-                          ? 'border-foreground bg-foreground text-background'
-                          : 'bg-background'
+                        vehicleType === "boda"
+                          ? "border-foreground bg-foreground text-background"
+                          : "bg-background"
                       }`}
                     >
                       Boda Boda
@@ -211,11 +208,11 @@ export function AuthScreen() {
 
                     <button
                       type="button"
-                      onClick={() => setVehicleType('vehicle')}
+                      onClick={() => setVehicleType("vehicle")}
                       className={`rounded-xl border px-4 py-3 text-sm font-medium ${
-                        vehicleType === 'vehicle'
-                          ? 'border-foreground bg-foreground text-background'
-                          : 'bg-background'
+                        vehicleType === "vehicle"
+                          ? "border-foreground bg-foreground text-background"
+                          : "bg-background"
                       }`}
                     >
                       Vehicle
@@ -234,9 +231,7 @@ export function AuthScreen() {
                   <input
                     id="deviceName"
                     value={deviceName}
-                    onChange={(event) =>
-                      setDeviceName(event.target.value)
-                    }
+                    onChange={(event) => setDeviceName(event.target.value)}
                     placeholder="My phone"
                     className="w-full rounded-xl border bg-background px-4 py-3 outline-none focus:ring-2"
                   />
@@ -256,20 +251,20 @@ export function AuthScreen() {
               className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading
-                ? 'Please wait…'
-                : mode === 'login'
-                  ? 'Sign in'
-                  : 'Create account'}
+                ? "Please wait…"
+                : mode === "login"
+                  ? "Sign in"
+                  : "Create account"}
             </button>
           </form>
 
           <div className="mt-6 text-center text-sm text-muted-foreground">
-            {mode === 'login' ? (
+            {mode === "login" ? (
               <>
-                Don't have an account?{' '}
+                Don't have an account?{" "}
                 <button
                   type="button"
-                  onClick={() => switchMode('register')}
+                  onClick={() => switchMode("register")}
                   className="font-semibold text-foreground underline underline-offset-4"
                 >
                   Create one
@@ -277,10 +272,10 @@ export function AuthScreen() {
               </>
             ) : (
               <>
-                Already have an account?{' '}
+                Already have an account?{" "}
                 <button
                   type="button"
-                  onClick={() => switchMode('login')}
+                  onClick={() => switchMode("login")}
                   className="font-semibold text-foreground underline underline-offset-4"
                 >
                   Sign in
@@ -291,5 +286,5 @@ export function AuthScreen() {
         </section>
       </div>
     </main>
-  )
+  );
 }
