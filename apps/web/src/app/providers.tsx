@@ -50,6 +50,8 @@ interface AppContextValue {
   income: IncomeEntry[];
   expenses: ExpenseEntry[];
   changeEntries: ChangeEntry[];
+  setAuthenticatedUser: (auth: AuthState) => void;
+  clearAuthenticatedUser: () => void;
   completeOnboarding: (data: OnboardingData) => void;
   startSession: () => void;
   endSession: () => void;
@@ -281,6 +283,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       stopSync();
     };
   }, [hydrated]);
+
+  /*
+   * Update the in-memory authentication state immediately
+   * after a successful login.
+   *
+   * IndexedDB remains the persistent source of truth.
+   * This method only keeps the React state synchronized
+   * with the authentication data already saved locally.
+   */
+  function setAuthenticatedUser(nextAuth: AuthState) {
+    setAuth(nextAuth);
+  }
+
+  /*
+   * Clear only the in-memory authentication state.
+   *
+   * The actual IndexedDB auth record is cleared by the
+   * logout flow in api.ts. Local transaction data is not
+   * touched here because it may contain unsynced offline
+   * work.
+   */
+  function clearAuthenticatedUser() {
+    setAuth(null);
+  }
 
   function completeOnboarding(data: OnboardingData) {
     setOnboarding(data);
@@ -707,6 +733,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         income,
         expenses,
         changeEntries,
+        setAuthenticatedUser,
+        clearAuthenticatedUser,
         completeOnboarding,
         startSession,
         endSession,

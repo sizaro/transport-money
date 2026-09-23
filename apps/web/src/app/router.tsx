@@ -8,6 +8,7 @@ import { BodaWorkingScreen } from "@/features/boda/BodaWorkingScreen";
 import { ExpensesScreen } from "@/features/expenses/ExpensesScreen";
 import { ChangeScreen } from "@/features/change/ChangeScreen";
 import { ReportsScreen } from "@/features/reports/ReportsScreen";
+import { ProfileScreen } from "@/features/profile/ProfileScreen";
 import { VehicleComingSoon } from "@/features/vehicle/VehicleComingSoon";
 
 function StartRedirect() {
@@ -84,6 +85,8 @@ export function AppRouter() {
         <Route path="change" element={<ChangeScreen />} />
 
         <Route path="reports" element={<ReportsScreen />} />
+
+        <Route path="profile" element={<ProfileScreen />} />
 
         <Route index element={<Navigate to="working" replace />} />
       </Route>
