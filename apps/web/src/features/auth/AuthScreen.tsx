@@ -1,13 +1,14 @@
 ﻿import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
 import { useApp } from "@/app/providers";
-import { apiLogin, apiRegister } from "@/lib/api";
+import { apiLogin, apiRegister, saveAuthResponse } from "@/lib/api";
 
 type Mode = "login" | "register";
 
 export function AuthScreen() {
   const navigate = useNavigate();
-  const { completeOnboarding } = useApp();
+  const { completeOnboarding, setAuthenticatedUser } = useApp();
 
   const [mode, setMode] = useState<Mode>("login");
   const [name, setName] = useState("");
@@ -17,6 +18,7 @@ export function AuthScreen() {
   const [deviceName, setDeviceName] = useState("Transport Money");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showPin, setShowPin] = useState(false);
 
   function switchMode(nextMode: Mode) {
     setMode(nextMode);
@@ -53,49 +55,41 @@ export function AuthScreen() {
           pin,
           vehicleType: vehicleType === "boda" ? "BODA" : "VEHICLE",
         });
-
-        const result = await apiLogin({
-          phone,
-          pin,
-          deviceName: deviceName.trim() || "Transport Money",
-        });
-
-        const resolvedVehicleType =
-          result.vehicle.type === "BODA" ? "boda" : "vehicle";
-
-        completeOnboarding({
-          vehicleType: resolvedVehicleType,
-          phone: phone.trim(),
-          name: result.user.name,
-          completed: true,
-        });
-
-        navigate(
-          resolvedVehicleType === "boda" ? "/boda/working" : "/vehicle",
-          { replace: true },
-        );
-      } else {
-        const result = await apiLogin({
-          phone,
-          pin,
-          deviceName: deviceName.trim() || "Transport Money",
-        });
-
-        const resolvedVehicleType =
-          result.vehicle.type === "BODA" ? "boda" : "vehicle";
-
-        completeOnboarding({
-          vehicleType: resolvedVehicleType,
-          phone: phone.trim(),
-          name: result.user.name,
-          completed: true,
-        });
-
-        navigate(
-          resolvedVehicleType === "boda" ? "/boda/working" : "/vehicle",
-          { replace: true },
-        );
       }
+
+      const result = await apiLogin({
+        phone,
+        pin,
+        deviceName: deviceName.trim() || "Transport Money",
+      });
+
+      /*
+       * apiLogin() persists the authentication data to IndexedDB.
+       *
+       * saveAuthResponse() gives us the same authentication data
+       * as an AuthState object so we can immediately update the
+       * React application's in-memory auth state too.
+       *
+       * This is important because RequireAuth reads the React
+       * state, not IndexedDB directly.
+       */
+      const auth = await saveAuthResponse(result);
+
+      setAuthenticatedUser(auth);
+
+      const resolvedVehicleType =
+        result.vehicle.type === "BODA" ? "boda" : "vehicle";
+
+      completeOnboarding({
+        vehicleType: resolvedVehicleType,
+        phone: phone.trim(),
+        name: result.user.name,
+        completed: true,
+      });
+
+      navigate(resolvedVehicleType === "boda" ? "/boda/working" : "/vehicle", {
+        replace: true,
+      });
     } catch (err) {
       setError(
         err instanceof Error
@@ -169,21 +163,32 @@ export function AuthScreen() {
                 4-digit PIN
               </label>
 
-              <input
-                id="pin"
-                value={pin}
-                onChange={(event) =>
-                  setPin(event.target.value.replace(/\D/g, "").slice(0, 4))
-                }
-                placeholder="••••"
-                inputMode="numeric"
-                autoComplete={
-                  mode === "login" ? "current-password" : "new-password"
-                }
-                maxLength={4}
-                type="password"
-                className="w-full rounded-xl border bg-background px-4 py-3 text-center text-xl tracking-[0.5em] outline-none focus:ring-2"
-              />
+              <div className="relative">
+                <input
+                  id="pin"
+                  value={pin}
+                  onChange={(event) =>
+                    setPin(event.target.value.replace(/\D/g, "").slice(0, 4))
+                  }
+                  placeholder="••••"
+                  inputMode="numeric"
+                  autoComplete={
+                    mode === "login" ? "current-password" : "new-password"
+                  }
+                  maxLength={4}
+                  type={showPin ? "text" : "password"}
+                  className="w-full rounded-xl border bg-background px-4 py-3 pr-12 text-center text-xl tracking-[0.5em] outline-none focus:ring-2"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setShowPin((current) => !current)}
+                  aria-label={showPin ? "Hide PIN" : "Show PIN"}
+                  className="absolute right-3 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                >
+                  {showPin ? "Hide" : "Show"}
+                </button>
+              </div>
             </div>
 
             {mode === "register" && (
